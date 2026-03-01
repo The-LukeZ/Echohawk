@@ -231,17 +231,19 @@ func (c *Checker) executeActions(e *events.MessageCreate, count int64, content s
 			}
 
 		case "delete_all":
-			// Delete the triggering message, then all stored similar ones.
-			_ = rest.DeleteMessage(msg.ChannelID, msg.ID)
+			// make array with all ids to delete and then bulk delete with rest.BulkDeleteMessages(channelID, []messageID)
+			var toDelete []snowflake.ID = []snowflake.ID{msg.ID}
 			for _, cached := range similarMsgs {
 				if cached.channelID == "" || cached.messageID == "" {
 					continue
 				}
-				chID, errCh := snowflake.Parse(cached.channelID)
 				mID, errM := snowflake.Parse(cached.messageID)
-				if errCh == nil && errM == nil {
-					_ = rest.DeleteMessage(chID, mID)
+				if errM == nil {
+					toDelete = append(toDelete, mID)
 				}
+			}
+			if len(toDelete) > 0 {
+				_ = rest.BulkDeleteMessages(msg.ChannelID, toDelete)
 			}
 
 		case "delete_last":
@@ -250,10 +252,7 @@ func (c *Checker) executeActions(e *events.MessageCreate, count int64, content s
 		case "dm_user":
 			dmChannel, err := rest.CreateDMChannel(msg.Author.ID)
 			if err == nil {
-				dm := fmt.Sprintf(
-					"⚠️ Your messages in the server have been flagged for spam (%d similar messages in %d seconds). Please avoid sending repetitive messages.",
-					count, c.windowSeconds,
-				)
+				dm := "⚠️ Your messages in the server have been flagged for spam. Please avoid sending repetitive messages."
 				_, _ = rest.CreateMessage(dmChannel.ID(), discord.NewMessageCreate().WithContent(dm))
 			}
 
