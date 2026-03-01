@@ -235,7 +235,7 @@ func main() {
 			),
 		),
 		bot.WithEventListenerFunc(func(e *events.Ready) {
-			fmt.Printf("Logged in as %s\n", e.User.Username)
+			fmt.Printf("Logged in as %s\n", e.User.Username + "#" + e.User.Discriminator)
 		}),
 		// Pass the method as a function value with checker.HandleMessage
 		bot.WithEventListenerFunc(checker.HandleMessage),
