@@ -16,7 +16,9 @@ This repository contains the bot source (`main.go`) and Docker/compose artifacts
 
 For further docs, check [the docs pages](./docs).
 
-## Why Go?
+---
+
+### Why Go?
 
 I always wanted to do a bot that does some kind of spam detection, but didn't find the time for it. Then someone asked if there are any public bots that do this - and the simple answer is "not really".
 So I offered to finally build it, and decided to do it in Go because the person's requirement was a server where with a very high volume of messages per second, usually up to 70k messages per day. Go's simplicity, performance and efficiency with concurrency seemed like a good fit for this use case, especially since the bot's only task is to process messages and interact with Valkey, which should be pretty lightweight (which was also a requirement from the server manager). I also wanted to learn Go for a while, so this seemed like a good opportunity to do both at the same time.
