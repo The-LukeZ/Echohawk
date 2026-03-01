@@ -1,0 +1,7 @@
+.env
+.DS_Store
+
+# golang
+bin/
+pkg/
+vendor/

@@ -1,0 +1,16 @@
+services:
+  echohawk:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    depends_on:
+      - valkey
+
+  valkey:
+    image: valkey/valkey:latest
+    restart: unless-stopped
+    volumes:
+      - valkey_data:/data
+
+volumes:
+  valkey_data:
