@@ -38,7 +38,7 @@ Mind, that you can only use `delete_all` **OR** `delete_last` — not both at th
 
 #### Example `.env`
 
-```
+```bash
 BOT_TOKEN=your_bot_token_here
 GUILD_ID=123456789012345678
 ALERT_CHANNEL_ID=987654321098765432
@@ -55,30 +55,29 @@ TIMEOUT_DURATION=3600
 
 1. Download dependencies and build:
 
-```
+```bash
 go mod tidy
 go build -o echohawk ./
 ```
 
 2. Run the bot (loads `.env` automatically via godotenv):
 
-```
+```bash
 ./echohawk
 ```
 
 Run with `go run` for quick testing:
 
-```
+```bash
 go run main.go
 ```
 
 ### Docker
 
-This repo includes a `Dockerfile` and `docker-compose.yml` (if present). Build and run via Docker if you prefer containerized deployment:
+This repo includes a `Dockerfile` and `docker-compose.yml`. Build and run via Docker if you prefer containerized deployment:
 
-```
-docker build -t echohawk .
-docker run --env-file .env echohawk
+```bash
+docker compose up -d --build
 ```
 
 ## Permissions and intents
@@ -93,3 +92,5 @@ There are two ways to exclude channels from monitoring:
 
 1. Set the `EXCLUDED_CHANNEL_IDS` environment variable to a comma-separated list of channel IDs to ignore.
 2. Deny the bot's `View Channel` permission for specific channels (even whole categories!) in your server settings. The bot will simply not receive message events for channels it cannot view.
+
+Excluding users based on roles or permissions is not currently supported but could be implemented in a future update.
