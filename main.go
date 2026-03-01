@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -21,18 +22,45 @@ import (
 )
 
 const (
-	maxCached     = 30   // max messages stored per user
-	cacheTTL      = 3600 // key expires after 1 hour of inactivity
-	counterTTL    = 300  // rolling 5-minute window for the alert counter
-	similarityMin = 0.85 // 85% similarity triggers a hit
-	alertAfter    = 3    // hits before alerting mods
+	maxCached = 30   // max messages stored per user
+	cacheTTL  = 3600 // key expires after 1 hour of inactivity
 )
+
+var (
+	similarityMin float64 = 0.85
+	alertAfter    int64   = 3
+	windowSeconds int64   = 300
+)
+
+func init() {
+	if v := os.Getenv("SIMILARITY_MIN"); v != "" {
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil {
+			similarityMin = parsed
+		}
+	}
+
+	if v := os.Getenv("ALERT_AFTER"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			alertAfter = parsed
+		}
+	}
+
+	if v := os.Getenv("WINDOW_SECONDS"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			windowSeconds = parsed
+		}
+	}
+}
 
 // Checker holds shared state — the Valkey client and alert channel ID.
 // Structs replace classes in Go: no constructor, just initialize the fields.
 type Checker struct {
-	vk           valkey.Client
-	alertChannel snowflake.ID
+	vk               valkey.Client
+	alertChannel     snowflake.ID
+	excludedChannels map[snowflake.ID]bool
+	similarityMin    float64
+	alertAfter       int64
+	windowSeconds    int64
 }
 
 // normalize strips noise before comparing so "Hello!" and "hello" count as the same.
@@ -61,6 +89,10 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	ctx := context.Background()
 	msg := e.Message
 	guildIdStr := os.Getenv("GUILD_ID")
+
+	if c.excludedChannels[msg.ChannelID] || msg.Author.Bot {
+		return
+	}
 
 	if guildIdStr == "" {
 		return // ignore DMs and messages from other servers
@@ -134,7 +166,7 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	// Set the TTL only on first increment (count == 1 means key was just created).
 	// This starts the 5-minute window from the first similar message.
 	if count == 1 {
-		c.vk.Do(ctx, c.vk.B().Expire().Key(counterKey).Seconds(counterTTL).Build())
+		c.vk.Do(ctx, c.vk.B().Expire().Key(counterKey).Seconds(c.windowSeconds).Build())
 	}
 
 	// --- Step 5: Alert if threshold exceeded, then reset the counter ---
@@ -142,9 +174,10 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 		c.vk.Do(ctx, c.vk.B().Del().Key(counterKey).Build())
 
 		alert := fmt.Sprintf(
-			"⚠️ **Spam detected** — <@%s> sent %d similar messages in the last 5 minutes.\nLatest message: `%s`",
-			msg.Author.ID, count, content,
+			"⚠️ **Spam detected** — <@%s> sent %d similar messages in the last %d seconds.\nLatest message: `%s`",
+			msg.Author.ID, count, c.windowSeconds, content,
 		)
+
 		_, err := e.Client().Rest.CreateMessage(
 			c.alertChannel,
 			discord.NewMessageCreate().WithContent(alert),
@@ -174,9 +207,22 @@ func main() {
 		panic("invalid ALERT_CHANNEL_ID in .env")
 	}
 
+	excludedChannels := map[snowflake.ID]bool{}
+	if v := os.Getenv("EXCLUDED_CHANNEL_IDS"); v != "" {
+		for raw := range strings.SplitSeq(v, ",") {
+			if id, err := snowflake.Parse(strings.TrimSpace(raw)); err == nil {
+				excludedChannels[id] = true
+			}
+		}
+	}
+
 	checker := &Checker{ // & means "give me a pointer to this struct"
-		vk:           vk,
-		alertChannel: alertChannelID,
+		vk:               vk,
+		alertChannel:     alertChannelID,
+		excludedChannels: excludedChannels,
+		similarityMin:    similarityMin,
+		alertAfter:       alertAfter,
+		windowSeconds:    windowSeconds,
 	}
 
 	client, err := disgo.New(
