@@ -10,3 +10,5 @@ Key features
 - Discord-native: uses privileged message content intent and sends alerts as messages to a configured channel.
 
 This repository contains the bot source (`main.go`) and Docker/compose artifacts for deployment.
+
+For further docs, check [the docs pages](./docs).
