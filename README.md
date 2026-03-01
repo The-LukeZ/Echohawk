@@ -2,7 +2,10 @@
 
 Echohawk is a small Discord bot written in Go that detects repeated or highly similar messages from the same user and sends an alert to a configured channel, optionally taking automated moderation actions. It is intended to help moderators identify and respond to spammy behaviour by measuring message similarity and counting events in a rolling time window.
 
-Key features
+> [!CAUTION]
+> This is my first Go project and still in development. I don't think it's stable yet, but feel free to check it out and give feedback.
+
+## Key features
 
 - Lightweight: uses Valkey (valkey-go) for a tiny, in-memory key/value store with TTLs.
 - Configurable: similarity threshold, alert threshold, time window and moderation actions are all environment-configurable.
