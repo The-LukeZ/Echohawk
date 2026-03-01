@@ -5,3 +5,6 @@
 bin/
 pkg/
 vendor/
+
+# binaries
+echohawk

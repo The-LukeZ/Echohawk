@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/agnivade/levenshtein"
 	"github.com/disgoorg/disgo"
@@ -16,6 +17,7 @@ import (
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
+	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/joho/godotenv"
 	valkey "github.com/valkey-io/valkey-go"
@@ -27,9 +29,11 @@ const (
 )
 
 var (
-	similarityMin float64 = 0.85
-	alertAfter    int64   = 3
-	windowSeconds int64   = 300
+	similarityMin   float64         = 0.85
+	alertAfter      int64           = 3
+	windowSeconds   int64           = 300
+	timeoutDuration int64           = 300 // seconds to timeout a user
+	actions         map[string]bool       // set of actions to execute on spam detection
 )
 
 func init() {
@@ -50,6 +54,21 @@ func init() {
 			windowSeconds = parsed
 		}
 	}
+
+	if v := os.Getenv("TIMEOUT_DURATION"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			timeoutDuration = parsed
+		}
+	}
+
+	// Parse ACTIONS as a comma-separated list, e.g. "delete_last,dm_user,timeout_user".
+	// Valid values: delete_all, delete_last, dm_user, timeout_user, kick_user, ban_user
+	actions = map[string]bool{}
+	if v := os.Getenv("ACTIONS"); v != "" {
+		for _, a := range strings.Split(v, ",") {
+			actions[strings.TrimSpace(a)] = true
+		}
+	}
 }
 
 // Checker holds shared state — the Valkey client and alert channel ID.
@@ -58,9 +77,35 @@ type Checker struct {
 	vk               valkey.Client
 	alertChannel     snowflake.ID
 	excludedChannels map[snowflake.ID]bool
+	guildID          snowflake.ID
+	actions          map[string]bool
 	similarityMin    float64
 	alertAfter       int64
 	windowSeconds    int64
+	timeoutDuration  int64
+}
+
+// cachedMsg holds a stored message's location and normalized content,
+// parsed back out of the Valkey list entry.
+type cachedMsg struct {
+	channelID string
+	messageID string
+	content   string
+}
+
+// formatEntry encodes channelID, messageID and content into a single string for Valkey storage.
+func formatEntry(channelID, messageID, content string) string {
+	return channelID + "|" + messageID + "|" + content
+}
+
+// parseEntry decodes a stored Valkey entry. Entries without embedded IDs (legacy/test data)
+// return empty strings for channelID and messageID.
+func parseEntry(entry string) cachedMsg {
+	parts := strings.SplitN(entry, "|", 3)
+	if len(parts) == 3 {
+		return cachedMsg{channelID: parts[0], messageID: parts[1], content: parts[2]}
+	}
+	return cachedMsg{content: entry} // legacy format fallback
 }
 
 // normalize strips noise before comparing so "Hello!" and "hello" count as the same.
@@ -88,23 +133,12 @@ func similarity(a, b string) float64 {
 func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	ctx := context.Background()
 	msg := e.Message
-	guildIdStr := os.Getenv("GUILD_ID")
 
 	if c.excludedChannels[msg.ChannelID] || msg.Author.Bot {
 		return
 	}
 
-	if guildIdStr == "" {
-		return // ignore DMs and messages from other servers
-	}
-
-	guildId, err := snowflake.Parse(guildIdStr)
-	if err != nil {
-		fmt.Println("invalid GUILD_ID in .env:", err)
-		return
-	}
-
-	if *msg.GuildID != guildId {
+	if msg.GuildID == nil || *msg.GuildID != c.guildID {
 		return // ignore DMs and messages from other servers
 	}
 
@@ -132,28 +166,30 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 		return
 	}
 
-	// --- Step 2: Count how many previous messages are too similar ---
-	similarCount := 0
-	for _, p := range prev {
-		if similarity(content, p) >= similarityMin {
-			similarCount++
+	// --- Step 2: Find similar previous messages and collect their IDs for potential deletion ---
+	var similarMsgs []cachedMsg
+	for _, raw := range prev {
+		cached := parseEntry(raw)
+		if similarity(content, cached.content) >= c.similarityMin {
+			similarMsgs = append(similarMsgs, cached)
 		}
 	}
 
-	// --- Step 3: Store the new message (3 commands, auto-pipelined by valkey-go) ---
-	// DoMulti sends all commands in one round-trip automatically.
+	// --- Step 3: Store the new message with its channel/message IDs ---
+	// Format: channelID|messageID|content — lets delete_all recover the IDs later.
 	// LPUSH → prepend, LTRIM → keep only last 30, EXPIRE → reset the 1h TTL.
+	entry := formatEntry(msg.ChannelID.String(), msg.ID.String(), content)
 	c.vk.DoMulti(ctx,
-		c.vk.B().Lpush().Key(msgKey).Element(content).Build(),
+		c.vk.B().Lpush().Key(msgKey).Element(entry).Build(),
 		c.vk.B().Ltrim().Key(msgKey).Start(0).Stop(int64(maxCached-1)).Build(),
 		c.vk.B().Expire().Key(msgKey).Seconds(cacheTTL).Build(),
 	)
 
-	if similarCount == 0 {
+	if len(similarMsgs) == 0 {
 		return
 	}
 
-	// --- Step 4: Increment the rolling 5-minute similarity counter ---
+	// --- Step 4: Increment the rolling similarity counter ---
 	// INCR is atomic, so concurrent messages won't cause a race condition.
 	count, err := c.vk.Do(ctx,
 		c.vk.B().Incr().Key(counterKey).Build(),
@@ -164,26 +200,74 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	}
 
 	// Set the TTL only on first increment (count == 1 means key was just created).
-	// This starts the 5-minute window from the first similar message.
+	// This starts the window from the first similar message.
 	if count == 1 {
 		c.vk.Do(ctx, c.vk.B().Expire().Key(counterKey).Seconds(c.windowSeconds).Build())
 	}
 
-	// --- Step 5: Alert if threshold exceeded, then reset the counter ---
-	if count >= int64(alertAfter) {
+	// --- Step 5: Execute configured actions when threshold exceeded, then reset counter ---
+	if count >= c.alertAfter {
 		c.vk.Do(ctx, c.vk.B().Del().Key(counterKey).Build())
+		c.executeActions(e, count, content, similarMsgs)
+	}
+}
 
-		alert := fmt.Sprintf(
-			"⚠️ **Spam detected** — <@%s> sent %d similar messages in the last %d seconds.\nLatest message: `%s`",
-			msg.Author.ID, count, c.windowSeconds, content,
-		)
+// executeActions sends the alert and runs every action listed in ACTIONS.
+// It is called only when the spam threshold is exceeded.
+func (c *Checker) executeActions(e *events.MessageCreate, count int64, content string, similarMsgs []cachedMsg) {
+	msg := e.Message
+	rest := e.Client().Rest
 
-		_, err := e.Client().Rest.CreateMessage(
-			c.alertChannel,
-			discord.NewMessageCreate().WithContent(alert),
-		)
-		if err != nil {
-			fmt.Println("failed to send alert:", err)
+	for action := range c.actions {
+		switch action {
+
+		case "alert":
+			alert := fmt.Sprintf(
+				"⚠️ **Spam detected** — <@%s> sent %d similar messages in the last %d seconds.\nLatest message: `%s`",
+				msg.Author.ID, count, c.windowSeconds, content,
+			)
+			if _, err := rest.CreateMessage(c.alertChannel, discord.NewMessageCreate().WithContent(alert)); err != nil {
+				fmt.Println("failed to send alert:", err)
+			}
+
+		case "delete_all":
+			// Delete the triggering message, then all stored similar ones.
+			_ = rest.DeleteMessage(msg.ChannelID, msg.ID)
+			for _, cached := range similarMsgs {
+				if cached.channelID == "" || cached.messageID == "" {
+					continue
+				}
+				chID, errCh := snowflake.Parse(cached.channelID)
+				mID, errM := snowflake.Parse(cached.messageID)
+				if errCh == nil && errM == nil {
+					_ = rest.DeleteMessage(chID, mID)
+				}
+			}
+
+		case "delete_last":
+			_ = rest.DeleteMessage(msg.ChannelID, msg.ID)
+
+		case "dm_user":
+			dmChannel, err := rest.CreateDMChannel(msg.Author.ID)
+			if err == nil {
+				dm := fmt.Sprintf(
+					"⚠️ Your messages in the server have been flagged for spam (%d similar messages in %d seconds). Please avoid sending repetitive messages.",
+					count, c.windowSeconds,
+				)
+				_, _ = rest.CreateMessage(dmChannel.ID(), discord.NewMessageCreate().WithContent(dm))
+			}
+
+		case "timeout_user":
+			until := time.Now().Add(time.Duration(c.timeoutDuration) * time.Second)
+			_, _ = rest.UpdateMember(c.guildID, msg.Author.ID, discord.MemberUpdate{
+				CommunicationDisabledUntil: omit.NewPtr(until),
+			})
+
+		case "kick_user":
+			_ = rest.RemoveMember(c.guildID, msg.Author.ID)
+
+		case "ban_user":
+			_ = rest.AddBan(c.guildID, msg.Author.ID, 0)
 		}
 	}
 }
@@ -207,6 +291,11 @@ func main() {
 		panic("invalid ALERT_CHANNEL_ID in .env")
 	}
 
+	guildID, err := snowflake.Parse(os.Getenv("GUILD_ID"))
+	if err != nil {
+		panic("invalid GUILD_ID in .env")
+	}
+
 	excludedChannels := map[snowflake.ID]bool{}
 	if v := os.Getenv("EXCLUDED_CHANNEL_IDS"); v != "" {
 		for raw := range strings.SplitSeq(v, ",") {
@@ -220,9 +309,12 @@ func main() {
 		vk:               vk,
 		alertChannel:     alertChannelID,
 		excludedChannels: excludedChannels,
+		guildID:          guildID,
+		actions:          actions,
 		similarityMin:    similarityMin,
 		alertAfter:       alertAfter,
 		windowSeconds:    windowSeconds,
+		timeoutDuration:  timeoutDuration,
 	}
 
 	client, err := disgo.New(
