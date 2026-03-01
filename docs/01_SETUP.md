@@ -1,12 +1,12 @@
 # Setup and configuration
 
-Prerequisites
+## Prerequisites
 
 - Go 1.20+ (or appropriate Go toolchain installed)
 - A running Valkey instance reachable from the bot
 - A Discord bot application with `Message Content` intent enabled in the Developer Portal
 
-Environment variables
+## Environment variables
 
 Create a `.env` file (the project uses `github.com/joho/godotenv`) and set these values:
 
@@ -21,7 +21,7 @@ Create a `.env` file (the project uses `github.com/joho/godotenv`) and set these
 - `ACTIONS` — comma-separated list of automated actions to take when spam is detected (optional, default: none — alert only). See table below.
 - `TIMEOUT_DURATION` — how long in seconds to time out a user when `timeout_user` is in `ACTIONS` (optional, default: `300`)
 
-Available actions
+### Available actions
 
 | Value          | Behaviour                                                                         |
 | -------------- | --------------------------------------------------------------------------------- |
@@ -34,9 +34,9 @@ Available actions
 
 Multiple actions can be combined freely, e.g. `ACTIONS=delete_all,dm_user,timeout_user`. An alert is always posted to `ALERT_CHANNEL_ID` regardless of what actions are configured.
 
-Mind, that you can only use `delete_all` **OR** `delete_last` — not both at the same time.
+Mind, that you can only use `delete_all` **OR** `delete_last` — not both at the same time. Same applies to `kick_user` and `ban_user`.
 
-Example `.env`
+#### Example `.env`
 
 ```
 BOT_TOKEN=your_bot_token_here
@@ -47,11 +47,11 @@ EXCLUDED_CHANNEL_IDS=111111111111111111,222222222222222222
 SIMILARITY_MIN=0.85
 ALERT_AFTER=3
 WINDOW_SECONDS=300
-ACTIONS=delete_last,dm_user
-TIMEOUT_DURATION=300
+ACTIONS=delete_last,dm_user,timeout_user
+TIMEOUT_DURATION=3600
 ```
 
-Build & run (local)
+## Build & run (local)
 
 1. Download dependencies and build:
 
@@ -72,7 +72,7 @@ Run with `go run` for quick testing:
 go run main.go
 ```
 
-Docker
+### Docker
 
 This repo includes a `Dockerfile` and `docker-compose.yml` (if present). Build and run via Docker if you prefer containerized deployment:
 
@@ -81,8 +81,15 @@ docker build -t echohawk .
 docker run --env-file .env echohawk
 ```
 
-Permissions and intents
+## Permissions and intents
 
-Ensure your bot has the `Guild Messages` and `Message Content` intents enabled in the Discord Developer Portal and the bot is invited to the target guild with the correct scopes and permissions.
+Ensure your bot has the `Message Content` intent enabled in the Developer Portal and the bot is invited to the target guild with the correct scopes and permissions.
 
 For moderation actions (`timeout_user`, `kick_user`, `ban_user`, `delete_all`, `delete_last`) the bot also needs the corresponding Discord permissions: `Moderate Members`, `Kick Members`, `Ban Members`, and `Manage Messages`.
+
+## How to exclude channels
+
+There are two ways to exclude channels from monitoring:
+
+1. Set the `EXCLUDED_CHANNEL_IDS` environment variable to a comma-separated list of channel IDs to ignore.
+2. Deny the bot's `View Channel` permission for specific channels (even whole categories!) in your server settings. The bot will simply not receive message events for channels it cannot view.
