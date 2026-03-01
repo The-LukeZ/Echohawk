@@ -10,7 +10,9 @@ When a non-bot message is posted in the configured guild, the bot:
 2. Loads the author's recent messages from Valkey using a list key `user:<userID>:messages`.
 3. Computes similarity between the new message and each previous message using Levenshtein distance, converted to a 0.0–1.0 ratio:
 
+   ```
    similarity = 1 - (levenshteinDistance / max(len(a), len(b)))
+   ```
 
 4. If at least one previous message meets `SIMILARITY_MIN`, the bot increments a rolling counter stored at `user:<userID>:similar_count`.
    - The counter key is created atomically via `INCR` and given a TTL of `WINDOW_SECONDS` on first increment.
