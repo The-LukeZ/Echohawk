@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	maxCached = 30   // max messages stored per user
+	maxCached = 50   // max messages stored per user
 	cacheTTL  = 3600 // key expires after 1 hour of inactivity
 )
 
