@@ -34,6 +34,7 @@ Create a `.env` file (the project uses `github.com/joho/godotenv`) and set these
 
 | Value          | Behaviour                                                                         |
 | -------------- | --------------------------------------------------------------------------------- |
+| `alert`        | Posts an alert message to `ALERT_CHANNEL_ID` with details about the detected spam |
 | `delete_all`   | Deletes the triggering message and all stored similar messages from the same user |
 | `delete_last`  | Deletes only the triggering message                                               |
 | `dm_user`      | Sends the user a direct message warning them about the spam detection             |

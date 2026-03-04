@@ -41,4 +41,4 @@ When a non-bot message is posted in the configured guild, the bot:
 
 - Excluding channels: `EXCLUDED_CHANNEL_IDS` can be set to skip specific channels.
 - The similarity function and thresholds can be tuned or replaced (e.g., fuzzy hashing, NLP embeddings) for different tolerance.
-- Alert formatting and destination can be modified to include more context, logging, or webhook integration.
+- You can send an alert message with details about the detected spam into the configured `ALERT_CHANNEL_ID` when the threshold is reached.
