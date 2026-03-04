@@ -2,16 +2,16 @@
 
 ## Prerequisites
 
+- A Discord bot application with `Message Content` intent enabled in the Developer Portal
+
 ### Building and running directly
 
 - Go 1.20+
 - A running Valkey instance reachable from the bot
-- A Discord bot application with `Message Content` intent enabled in the Developer Portal
 
 ### Docker
 
-- Docker and Docker Compose installed
-
+- Docker and Docker Compose installed  
   Valkey is included as a service in the `docker-compose.yml`.
 
 ## Environment variables
