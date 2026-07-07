@@ -8,3 +8,4 @@ vendor/
 
 # binaries
 echohawk
+echohawk.*

@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,12 +30,17 @@ const (
 )
 
 var (
-	similarityMin   float64         = 0.85
-	alertAfter      int64           = 3
-	windowSeconds   int64           = 300
-	timeoutDuration int64           = 300 // seconds to timeout a user
-	actions         map[string]bool       // set of actions to execute on spam detection
+	similarityMin    float64         = 0.85
+	alertAfter       int64           = 3
+	windowSeconds    int64           = 300
+	timeoutDuration  int64           = 300 // seconds to timeout a user
+	actions          map[string]bool       // set of actions to execute on spam detection
+	unifyAttachments bool                  // treat all Discord CDN attachment links as identical content
 )
+
+// attachmentURLRegex matches Discord CDN/media links so different attachment URLs
+// (e.g. two unrelated image uploads) can be collapsed to one placeholder before comparison.
+var attachmentURLRegex = regexp.MustCompile(`(?i)https?://(?:cdn\.discordapp\.com|media\.discordapp\.net)/\S+`)
 
 func init() {
 	if v := os.Getenv("SIMILARITY_MIN"); v != "" {
@@ -69,9 +75,15 @@ func init() {
 			actions[strings.TrimSpace(a)] = true
 		}
 	}
+
+	if v := os.Getenv("UNIFY_ATTACHMENTS"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			unifyAttachments = parsed
+		}
+	}
 }
 
-// Checker holds shared state — the Valkey client and alert channel ID.
+// Checker holds shared state - the Valkey client and alert channel ID.
 // Structs replace classes in Go: no constructor, just initialize the fields.
 type Checker struct {
 	vk               valkey.Client
@@ -109,8 +121,14 @@ func parseEntry(entry string) cachedMsg {
 }
 
 // normalize strips noise before comparing so "Hello!" and "hello" count as the same.
+// When unifyAttachments is on, Discord CDN links are collapsed to one placeholder so
+// spam consisting of different attachment URLs (e.g. unique image links) still matches.
 func normalize(s string) string {
-	return strings.ToLower(strings.TrimSpace(s))
+	s = strings.ToLower(strings.TrimSpace(s))
+	if unifyAttachments {
+		s = attachmentURLRegex.ReplaceAllString(s, "[attachment]")
+	}
+	return s
 }
 
 // similarity returns a 0.0–1.0 ratio so message length doesn't skew results.
@@ -128,7 +146,7 @@ func similarity(a, b string) float64 {
 }
 
 // HandleMessage is the core logic, called for every non-bot message.
-// The method receiver (c *Checker) is Go's way of attaching functions to a struct —
+// The method receiver (c *Checker) is Go's way of attaching functions to a struct -
 // like a class method, but declared separately. c is equivalent to `this` in TS.
 func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	ctx := context.Background()
@@ -155,12 +173,12 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 
 	// --- Step 1: Fetch the user's last N messages from Valkey ---
 	// .Do() sends a single command. The builder pattern (B().Lrange()...) is
-	// valkey-go's typed command builder — no raw string commands.
+	// valkey-go's typed command builder - no raw string commands.
 	prev, err := c.vk.Do(ctx,
 		c.vk.B().Lrange().Key(msgKey).Start(0).Stop(-1).Build(),
 	).AsStrSlice()
 
-	// IsValkeyNil means the key doesn't exist yet — not a real error.
+	// IsValkeyNil means the key doesn't exist yet - not a real error.
 	if err != nil && !valkey.IsValkeyNil(err) {
 		fmt.Println("valkey fetch error:", err)
 		return
@@ -176,7 +194,7 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	}
 
 	// --- Step 3: Store the new message with its channel/message IDs ---
-	// Format: channelID|messageID|content — lets delete_all recover the IDs later.
+	// Format: channelID|messageID|content - lets delete_all recover the IDs later.
 	// LPUSH → prepend, LTRIM → keep only last 30, EXPIRE → reset the 1h TTL.
 	entry := formatEntry(msg.ChannelID.String(), msg.ID.String(), content)
 	c.vk.DoMulti(ctx,
@@ -223,7 +241,7 @@ func (c *Checker) executeActions(e *events.MessageCreate, count int64, content s
 
 		case "alert":
 			alert := fmt.Sprintf(
-				"⚠️ **Spam detected** — <@%s> sent %d similar messages in the last %d seconds.\nLatest message: `%s`",
+				"⚠️ **Spam detected** - <@%s> sent %d similar messages in the last %d seconds.\nLatest message: `%s`",
 				msg.Author.ID, count, c.windowSeconds, content,
 			)
 			if _, err := rest.CreateMessage(c.alertChannel, discord.NewMessageCreate().WithContent(alert)); err != nil {
@@ -283,7 +301,7 @@ func main() {
 	if err != nil {
 		panic(fmt.Sprintf("failed to connect to Valkey: %v", err))
 	}
-	defer vk.Close() // defer runs when main() exits — like `finally` in TS
+	defer vk.Close() // defer runs when main() exits - like `finally` in TS
 
 	alertChannelID, err := snowflake.Parse(os.Getenv("ALERT_CHANNEL_ID"))
 	if err != nil {
@@ -322,7 +340,7 @@ func main() {
 			gateway.WithIntents(
 				gateway.IntentGuilds,
 				gateway.IntentGuildMessages,
-				gateway.IntentMessageContent, // privileged — enable in Dev Portal
+				gateway.IntentMessageContent, // privileged - enable in Dev Portal
 			),
 		),
 		bot.WithEventListenerFunc(func(e *events.Ready) {

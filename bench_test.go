@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// helpers
 
 // buildCache constructs a slice of n normalized strings that look like real
 // cached messages, used as the "prev" slice in HandleMessage.
@@ -34,7 +34,7 @@ func countSimilar(content string, prev []string) int {
 	return count
 }
 
-// ── normalize benchmarks ──────────────────────────────────────────────────────
+// normalize benchmarks
 
 func BenchmarkNormalize_Short(b *testing.B) {
 	input := "  HELLO WORLD!  "
@@ -62,7 +62,44 @@ func BenchmarkNormalize_Parallel(b *testing.B) {
 	})
 }
 
-// ── similarity benchmarks ─────────────────────────────────────────────────────
+// normalize + UNIFY_ATTACHMENTS benchmarks
+//
+// These measure the cost normalize() pays for the attachment-URL regex pass
+// when UNIFY_ATTACHMENTS is enabled, vs. the flag-off baseline above.
+
+func BenchmarkNormalize_UnifyAttachments_NoLink(b *testing.B) {
+	unifyAttachments = true
+	defer func() { unifyAttachments = false }()
+	input := "  " + strings.Repeat("This Is A Sentence. ", 50) + "  "
+	b.ResetTimer()
+	for b.Loop() {
+		normalize(input)
+	}
+}
+
+func BenchmarkNormalize_UnifyAttachments_WithLink(b *testing.B) {
+	unifyAttachments = true
+	defer func() { unifyAttachments = false }()
+	input := "check this out https://cdn.discordapp.com/attachments/123456789/987654321/image.png?ex=abcd1234&is=efgh5678"
+	b.ResetTimer()
+	for b.Loop() {
+		normalize(input)
+	}
+}
+
+func BenchmarkNormalize_UnifyAttachments_Parallel(b *testing.B) {
+	unifyAttachments = true
+	defer func() { unifyAttachments = false }()
+	input := "spam drop " + strings.Repeat("https://cdn.discordapp.com/attachments/1/2/a.png ", 5)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			normalize(input)
+		}
+	})
+}
+
+// similarity benchmarks
 
 func BenchmarkSimilarity_Identical(b *testing.B) {
 	a := "the quick brown fox jumps over the lazy dog"
@@ -128,7 +165,7 @@ func BenchmarkSimilarity_Parallel(b *testing.B) {
 	})
 }
 
-// ── similarity loop benchmarks (mirrors HandleMessage hot path) ───────────────
+// similarity loop benchmarks (mirrors HandleMessage hot path)
 
 // BenchmarkSimilarityLoop_NoHits: new message is completely unlike all cached ones.
 func BenchmarkSimilarityLoop_NoHits(b *testing.B) {
@@ -155,7 +192,7 @@ func BenchmarkSimilarityLoop_AllHits(b *testing.B) {
 	}
 }
 
-// BenchmarkSimilarityLoop_HalfHits: 15 hits, 15 misses — typical mid-traffic case.
+// BenchmarkSimilarityLoop_HalfHits: 15 hits, 15 misses - typical mid-traffic case.
 func BenchmarkSimilarityLoop_HalfHits(b *testing.B) {
 	base := normalize("buy cheap products now click here")
 	content := normalize("buy cheap products now click here!")
@@ -183,7 +220,25 @@ func BenchmarkSimilarityLoop_LongMessages(b *testing.B) {
 	}
 }
 
-// ── cache-size sweep benchmarks ───────────────────────────────────────────────
+// BenchmarkSimilarityLoop_UnifyAttachments_AllHits: each cached message carries a
+// unique attachment link (like real-world image spam); with UNIFY_ATTACHMENTS on
+// they all collapse to the same placeholder and should all hit.
+func BenchmarkSimilarityLoop_UnifyAttachments_AllHits(b *testing.B) {
+	unifyAttachments = true
+	defer func() { unifyAttachments = false }()
+
+	content := normalize("check this out https://cdn.discordapp.com/attachments/999/999/z.png")
+	prev := make([]string, maxCached)
+	for i := range prev {
+		prev[i] = normalize(fmt.Sprintf("check this out https://cdn.discordapp.com/attachments/%d/%d/img%d.png", i, i, i))
+	}
+	b.ResetTimer()
+	for b.Loop() {
+		countSimilar(content, prev)
+	}
+}
+
+// cache-size sweep benchmarks
 //
 // These measure how the similarity loop scales as the per-user cache grows
 // from the current maxCached (30) up to 100 entries, at both short and long
@@ -219,7 +274,7 @@ func BenchmarkCacheSweep_Long_75(b *testing.B)  { benchCacheSize(b, 75, longMsg)
 func BenchmarkCacheSweep_Long_100(b *testing.B) { benchCacheSize(b, 100, longMsg) }
 
 // BenchmarkSimilarityLoop_Parallel: concurrent goroutines each running a full
-// message check — closest simulation to real multi-user Discord traffic.
+// message check - closest simulation to real multi-user Discord traffic.
 func BenchmarkSimilarityLoop_Parallel(b *testing.B) {
 	base := normalize("buy cheap products now click here")
 	content := normalize("buy cheap products now click here!")
@@ -234,14 +289,14 @@ func BenchmarkSimilarityLoop_Parallel(b *testing.B) {
 	})
 }
 
-// ── sustained-throughput tests ────────────────────────────────────────────────
+// sustained-throughput tests
 //
 // These tests answer "is the pure-compute hot path reliable at N msg/s?"
 // They pace message arrivals with a ticker (real wall-clock rate), dispatch
 // each message to a goroutine, collect per-message latencies, then report
 // p50/p95/p99 and fail if any single message exceeds the hard deadline.
 //
-// Valkey round-trips are not included — those depend on network/infra.
+// Valkey round-trips are not included - those depend on network/infra.
 // The budget here is purely normalize + 30-entry similarity scan.
 
 const (

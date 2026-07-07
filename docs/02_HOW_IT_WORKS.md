@@ -7,6 +7,7 @@ This document describes the runtime behavior and data flow implemented in `main.
 When a non-bot message is posted in the configured guild, the bot:
 
 1. Normalizes the message content (`strings.ToLower` + `TrimSpace`). Empty or embed-only messages are ignored.
+   - If `UNIFY_ATTACHMENTS` is `true`, Discord CDN/media links (`cdn.discordapp.com`, `media.discordapp.net`) are also collapsed to a single `[attachment]` placeholder, so messages differing only by attachment URL are treated as identical content.
 2. Loads the author's recent messages from Valkey using a list key `user:<userID>:messages`.
 3. Computes similarity between the new message and each previous message using Levenshtein distance, converted to a 0.0–1.0 ratio:
 
@@ -21,8 +22,8 @@ When a non-bot message is posted in the configured guild, the bot:
 
 ## Storage keys and invariants
 
-- `user:<id>:messages` — list (LPUSH) of recent normalized messages for the user. The list is trimmed to `maxCached` (default 30) and given a TTL of `cacheTTL` (default 3600s) on each write.
-- `user:<id>:similar_count` — incrementing integer used to count similar messages inside the rolling window. TTL equals `WINDOW_SECONDS`.
+- `user:<id>:messages` - list (LPUSH) of recent normalized messages for the user. The list is trimmed to `maxCached` (default 30) and given a TTL of `cacheTTL` (default 3600s) on each write.
+- `user:<id>:similar_count` - incrementing integer used to count similar messages inside the rolling window. TTL equals `WINDOW_SECONDS`.
 
 ## Why Valkey and approach
 
@@ -32,10 +33,11 @@ When a non-bot message is posted in the configured guild, the bot:
 
 ## Configurable parameters
 
-- `SIMILARITY_MIN` — similarity threshold (float). Default `0.85`.
-- `ALERT_AFTER` — number of similar messages required to alert. Default `3`.
-- `WINDOW_SECONDS` — seconds for the rolling window. Default `300`.
-- `maxCached` and `cacheTTL` are defined in code: `maxCached = 30`, `cacheTTL = 3600`.
+- `SIMILARITY_MIN` - similarity threshold (float). Default `0.85`.
+- `ALERT_AFTER` - number of similar messages required to alert. Default `3`.
+- `WINDOW_SECONDS` - seconds for the rolling window. Default `300`.
+- `UNIFY_ATTACHMENTS` - bool, collapse Discord CDN/media links to one placeholder before comparison. Default `false`.
+- `maxCached` and `cacheTTL` are defined in code: `maxCached = 50`, `cacheTTL = 3600`.
 
 ## Extensibility notes
 

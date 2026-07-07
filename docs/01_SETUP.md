@@ -18,17 +18,18 @@
 
 Create a `.env` file (the project uses `github.com/joho/godotenv`) and set these values:
 
-- `BOT_TOKEN` — Discord bot token
-- `GUILD_ID` — the Snowflake ID of the guild (server) to monitor
-- `ALERT_CHANNEL_ID` — Snowflake ID of the channel where alerts should be posted
-- `VALKEY_ADDR` — address(es) of your Valkey instance (e.g. `127.0.0.1:6379`)
+- `BOT_TOKEN` - Discord bot token
+- `GUILD_ID` - the Snowflake ID of the guild (server) to monitor
+- `ALERT_CHANNEL_ID` - Snowflake ID of the channel where alerts should be posted
+- `VALKEY_ADDR` - address(es) of your Valkey instance (e.g. `127.0.0.1:6379`)
   - When running via Docker Compose, you need to use `valkey:6379` as the address
-- `EXCLUDED_CHANNEL_IDS` — comma-separated channel IDs to ignore (optional)
-- `SIMILARITY_MIN` — float (0.0–1.0) threshold for similarity (optional, default: `0.85`)
-- `ALERT_AFTER` — number of similar messages to trigger an alert (optional, default: `3`)
-- `WINDOW_SECONDS` — rolling window in seconds for counting similar messages (optional, default: `300`)
-- `ACTIONS` — comma-separated list of automated actions to take when spam is detected (optional, default: none — alert only). See table below.
-- `TIMEOUT_DURATION` — how long in seconds to time out a user when `timeout_user` is in `ACTIONS` (optional, default: `300`)
+- `EXCLUDED_CHANNEL_IDS` - comma-separated channel IDs to ignore (optional)
+- `SIMILARITY_MIN` - float (0.0–1.0) threshold for similarity (optional, default: `0.85`)
+- `ALERT_AFTER` - number of similar messages to trigger an alert (optional, default: `3`)
+- `WINDOW_SECONDS` - rolling window in seconds for counting similar messages (optional, default: `300`)
+- `ACTIONS` - comma-separated list of automated actions to take when spam is detected (optional, default: none - alert only). See table below.
+- `TIMEOUT_DURATION` - how long in seconds to time out a user when `timeout_user` is in `ACTIONS` (optional, default: `300`)
+- `UNIFY_ATTACHMENTS` - when `true`, Discord CDN attachment/media links are collapsed to one placeholder before comparison, so spam using a different image link per message still matches (optional, default: `false`)
 
 ### Available actions
 
@@ -44,7 +45,7 @@ Create a `.env` file (the project uses `github.com/joho/godotenv`) and set these
 
 Multiple actions can be combined freely, e.g. `ACTIONS=delete_all,dm_user,timeout_user`. An alert is always posted to `ALERT_CHANNEL_ID` regardless of what actions are configured.
 
-Mind, that you can only use `delete_all` **OR** `delete_last` — not both at the same time. Same applies to `kick_user` and `ban_user`.
+Mind, that you can only use `delete_all` **OR** `delete_last` - not both at the same time. Same applies to `kick_user` and `ban_user`.
 
 #### Example `.env`
 

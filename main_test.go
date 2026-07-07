@@ -43,6 +43,70 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
+func TestNormalizeUnifyAttachments(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "cdn.discordapp.com link replaced",
+			input:    "check this out https://cdn.discordapp.com/attachments/123/456/image.png",
+			expected: "check this out [attachment]",
+		},
+		{
+			name:     "media.discordapp.net link replaced",
+			input:    "LOOK https://media.discordapp.net/attachments/1/2/pic.jpg?ex=abc",
+			expected: "look [attachment]",
+		},
+		{
+			name:     "non-discord link left untouched",
+			input:    "see https://example.com/image.png",
+			expected: "see https://example.com/image.png",
+		},
+		{
+			name:     "no link, unaffected",
+			input:    "Hello!",
+			expected: "hello!",
+		},
+	}
+
+	unifyAttachments = true
+	defer func() { unifyAttachments = false }()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalize(tt.input)
+			if result != tt.expected {
+				t.Errorf("normalize(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNormalizeAttachmentsUntouchedWhenDisabled(t *testing.T) {
+	unifyAttachments = false
+
+	input := "check this out https://cdn.discordapp.com/attachments/123/456/image.png"
+	expected := "check this out https://cdn.discordapp.com/attachments/123/456/image.png"
+
+	if result := normalize(input); result != expected {
+		t.Errorf("normalize(%q) = %q, want %q (flag off should be no-op)", input, result, expected)
+	}
+}
+
+func TestSimilarityUnifiesDifferentAttachmentLinks(t *testing.T) {
+	unifyAttachments = true
+	defer func() { unifyAttachments = false }()
+
+	a := normalize("check this out https://cdn.discordapp.com/attachments/1/1/a.png")
+	b := normalize("check this out https://cdn.discordapp.com/attachments/2/2/b.png")
+
+	if got := similarity(a, b); got != 1.0 {
+		t.Errorf("similarity(%q, %q) = %v, want 1.0 (different attachment links should unify)", a, b, got)
+	}
+}
+
 func TestSimilarity(t *testing.T) {
 	tests := []struct {
 		name     string
