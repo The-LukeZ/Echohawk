@@ -186,6 +186,18 @@ var commandDefs = []discord.ApplicationCommandCreate{
 							},
 						},
 					},
+					{
+						Name:        "get",
+						Description: "Show the current text of a message template",
+						Options: []discord.ApplicationCommandOption{
+							discord.ApplicationCommandOptionString{
+								Name:        "key",
+								Description: "Which template to show",
+								Required:    true,
+								Choices:     messageKeyChoices(),
+							},
+						},
+					},
 				},
 			},
 		},
@@ -224,6 +236,9 @@ func (c *Checker) HandleConfigCommand(e *events.ApplicationCommandInteractionCre
 		cfg, err = c.handleActionsCommand(data)
 	case data.SubCommandGroupName != nil && *data.SubCommandGroupName == "excluded_channels":
 		cfg, err = c.handleExcludedChannelsCommand(data)
+	case data.SubCommandGroupName != nil && *data.SubCommandGroupName == "message" && data.SubCommandName != nil && *data.SubCommandName == "get":
+		c.replyMessageGet(e, data.String("key"))
+		return
 	case data.SubCommandGroupName != nil && *data.SubCommandGroupName == "message":
 		cfg, err = c.handleMessageCommand(data)
 	case data.SubCommandName != nil && *data.SubCommandName == "view":
@@ -391,6 +406,29 @@ func unknownPlaceholders(template string) []string {
 		i += end
 	}
 	return unknown
+}
+
+// replyMessageGet shows the full current text of a single message template -
+// /config view only lists keys since templates can be long enough to clutter
+// that embed.
+func (c *Checker) replyMessageGet(e *events.ApplicationCommandInteractionCreate, key string) {
+	if _, ok := defaultMessages[key]; !ok {
+		c.replyError(e, fmt.Sprintf("unknown message key %q", key))
+		return
+	}
+
+	template := c.Cfg().Messages[key]
+	embed := discord.Embed{
+		Title:       "message template: " + key,
+		Description: "```\n" + escapeCodeBlock(template) + "\n```",
+	}
+	_ = e.CreateMessage(discord.NewMessageCreate().WithEmbeds(embed).WithEphemeral(true))
+}
+
+// escapeCodeBlock breaks up any ``` sequence in template so it can't close
+// the surrounding code block early.
+func escapeCodeBlock(template string) string {
+	return strings.ReplaceAll(template, "```", "` ` `")
 }
 
 func (c *Checker) replyView(e *events.ApplicationCommandInteractionCreate) {
