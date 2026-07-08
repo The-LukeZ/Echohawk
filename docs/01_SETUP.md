@@ -70,7 +70,7 @@ TIMEOUT_DURATION=3600
 
 ```bash
 go mod tidy
-go build -o echohawk ./
+go build -o echohawk ./cmd/echohawk
 ```
 
 2. Run the bot (loads `.env` automatically via godotenv):
@@ -82,7 +82,7 @@ go build -o echohawk ./
 Run with `go run` for quick testing:
 
 ```bash
-go run main.go
+go run ./cmd/echohawk
 ```
 
 ### Docker

@@ -7,5 +7,5 @@ pkg/
 vendor/
 
 # binaries
-echohawk
-echohawk.*
+./echohawk
+./echohawk.*

@@ -12,7 +12,7 @@ Echohawk is a small Discord bot written in Go that detects repeated or highly si
 - Automated actions: when spam is detected the bot can delete messages, DM the user, apply a timeout, kick, or ban - individually or in any combination.
 - Discord-native: uses privileged message content intent and sends alerts as messages to a configured channel.
 
-This repository contains the bot source (`main.go`) and Docker/compose artifacts for deployment.
+This repository contains the bot source (`cmd/echohawk/`) and Docker/compose artifacts for deployment.
 
 For further docs, check [the docs pages](./docs).
 

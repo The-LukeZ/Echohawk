@@ -1,6 +1,6 @@
 # How the bot works
 
-This document describes the runtime behavior and data flow implemented in `main.go`.
+This document describes the runtime behavior and data flow implemented in `cmd/echohawk/`.
 
 ## Overview
 
