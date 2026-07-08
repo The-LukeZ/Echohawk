@@ -80,6 +80,7 @@ func main() {
 		// Pass the method as a function value with checker.HandleMessage
 		bot.WithEventListenerFunc(checker.HandleMessage),
 		bot.WithEventListenerFunc(checker.HandleConfigCommand),
+		bot.WithEventListenerFunc(checker.HandleConfigMessageModalSubmit),
 	)
 	if err != nil {
 		panic(err)

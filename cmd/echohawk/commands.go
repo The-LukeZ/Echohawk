@@ -159,18 +159,13 @@ var commandDefs = []discord.ApplicationCommandCreate{
 				Options: []discord.ApplicationCommandOptionSubCommand{
 					{
 						Name:        "set",
-						Description: "Set a message template",
+						Description: "Edit a message template in a popup with a multi-line text box",
 						Options: []discord.ApplicationCommandOption{
 							discord.ApplicationCommandOptionString{
 								Name:        "key",
-								Description: "Which template to set",
+								Description: "Which template to edit",
 								Required:    true,
 								Choices:     messageKeyChoices(),
-							},
-							discord.ApplicationCommandOptionString{
-								Name:        "template",
-								Description: "New template text (placeholders: {user_id} {count} {window} {content})",
-								Required:    true,
 							},
 						},
 					},
@@ -239,8 +234,11 @@ func (c *Checker) HandleConfigCommand(e *events.ApplicationCommandInteractionCre
 	case data.SubCommandGroupName != nil && *data.SubCommandGroupName == "message" && data.SubCommandName != nil && *data.SubCommandName == "get":
 		c.replyMessageGet(e, data.String("key"))
 		return
+	case data.SubCommandGroupName != nil && *data.SubCommandGroupName == "message" && data.SubCommandName != nil && *data.SubCommandName == "set":
+		c.openMessageModal(e, data.String("key"))
+		return
 	case data.SubCommandGroupName != nil && *data.SubCommandGroupName == "message":
-		cfg, err = c.handleMessageCommand(data)
+		cfg, err = c.handleMessageResetCommand(data)
 	case data.SubCommandName != nil && *data.SubCommandName == "view":
 		c.replyView(e)
 		return
@@ -354,34 +352,97 @@ func (c *Checker) handleExcludedChannelsCommand(data discord.SlashCommandInterac
 	return c.store.SetExcludedChannel(ch.ID, excluded)
 }
 
-func (c *Checker) handleMessageCommand(data discord.SlashCommandInteractionData) (*Config, error) {
+func (c *Checker) handleMessageResetCommand(data discord.SlashCommandInteractionData) (*Config, error) {
 	key := data.String("key")
-
-	if data.SubCommandName != nil && *data.SubCommandName == "reset" {
-		def, ok := defaultMessages[key]
-		if !ok {
-			return nil, fmt.Errorf("unknown message key %q", key)
-		}
-		return c.store.SetMessage(key, def)
-	}
-
-	template := data.String("template")
-	if strings.TrimSpace(template) == "" {
-		return nil, fmt.Errorf("template cannot be empty")
-	}
-	if _, ok := defaultMessages[key]; !ok {
+	def, ok := defaultMessages[key]
+	if !ok {
 		return nil, fmt.Errorf("unknown message key %q", key)
 	}
-	if unknown := unknownPlaceholders(template); len(unknown) > 0 {
-		return nil, fmt.Errorf("template contains unknown placeholder(s): %s (allowed: {user_id} {count} {window} {content})", strings.Join(unknown, ", "))
+	return c.store.SetMessage(key, def)
+}
+
+// messageModalCustomID and parseMessageModalCustomID round-trip the message
+// key through the modal's custom_id, since a modal can't carry extra hidden
+// state of its own - the key chosen in the "/config message set" option has
+// to survive until the modal is submitted (a separate interaction).
+const messageModalCustomIDPrefix = "config_message_set:"
+
+func messageModalCustomID(key string) string {
+	return messageModalCustomIDPrefix + key
+}
+
+func parseMessageModalCustomID(customID string) (key string, ok bool) {
+	if !strings.HasPrefix(customID, messageModalCustomIDPrefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(customID, messageModalCustomIDPrefix), true
+}
+
+// openMessageModal responds to "/config message set <key>" with a popup
+// containing a multi-line text box, pre-filled with the current template -
+// this replaces the old "template" string option, which couldn't take
+// literal newlines or show existing content for editing.
+func (c *Checker) openMessageModal(e *events.ApplicationCommandInteractionCreate, key string) {
+	if _, ok := defaultMessages[key]; !ok {
+		c.replyError(e, fmt.Sprintf("unknown message key %q", key))
+		return
 	}
 
-	// Discord string options can't carry a literal newline keystroke, so
-	// users type the escape sequence "\n" to mean one - turn it into a real
-	// newline before storing, or it would render as a literal backslash-n.
-	template = strings.ReplaceAll(template, `\n`, "\n")
+	current := c.Cfg().Messages[key]
+	textInput := discord.NewParagraphTextInput("template").
+		WithRequired(true).
+		WithMaxLength(4000).
+		WithValue(current).
+		WithPlaceholder("Placeholders: {user_id} {count} {window} {content}")
 
-	return c.store.SetMessage(key, template)
+	modal := discord.NewModalCreate(messageModalCustomID(key), "Edit message: "+key).
+		AddLabel("Template", textInput)
+
+	if err := e.Modal(modal); err != nil {
+		fmt.Println("failed to open message modal:", err)
+	}
+}
+
+// HandleConfigMessageModalSubmit handles the modal opened by openMessageModal.
+// Registered as the ModalSubmitInteractionCreate listener in main().
+func (c *Checker) HandleConfigMessageModalSubmit(e *events.ModalSubmitInteractionCreate) {
+	key, ok := parseMessageModalCustomID(e.Data.CustomID)
+	if !ok {
+		return
+	}
+
+	if e.GuildID() == nil || *e.GuildID() != c.guildID {
+		c.replyModalError(e, "This command can only be used in the server Echohawk is configured for.")
+		return
+	}
+	member := e.Member()
+	if member == nil || !member.Permissions.Has(discord.PermissionManageGuild) {
+		c.replyModalError(e, "You need the Manage Server permission to use this command.")
+		return
+	}
+
+	template := e.Data.Text("template")
+	if strings.TrimSpace(template) == "" {
+		c.replyModalError(e, "template cannot be empty")
+		return
+	}
+	if unknown := unknownPlaceholders(template); len(unknown) > 0 {
+		c.replyModalError(e, fmt.Sprintf("template contains unknown placeholder(s): %s (allowed: {user_id} {count} {window} {content})", strings.Join(unknown, ", ")))
+		return
+	}
+
+	cfg, err := c.store.SetMessage(key, template)
+	if err != nil {
+		c.replyModalError(e, err.Error())
+		return
+	}
+
+	c.SetCfg(cfg)
+	_ = e.CreateMessage(discord.NewMessageCreate().WithContent("✅ Configuration updated.").WithEphemeral(true))
+}
+
+func (c *Checker) replyModalError(e *events.ModalSubmitInteractionCreate, msg string) {
+	_ = e.CreateMessage(discord.NewMessageCreate().WithContent("❌ " + msg).WithEphemeral(true))
 }
 
 // unknownPlaceholders scans template for {...} tokens that aren't one of the
