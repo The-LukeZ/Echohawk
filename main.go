@@ -15,6 +15,7 @@ import (
 	"github.com/agnivade/levenshtein"
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
@@ -145,6 +146,31 @@ func similarity(a, b string) float64 {
 	return 1.0 - float64(dist)/maxLen
 }
 
+// isChannelExcluded checks channelID and walks up its parent chain (thread -> parent
+// channel -> category) against excludedChannels, so excluding a channel or category also
+// excludes its threads/children. Parent lookups use disgo's in-memory channel cache
+// (populated from gateway events), so no extra REST calls or Valkey round-trips are needed.
+// Channels only nest two levels deep on Discord (category -> channel -> thread), so the
+// loop bound is just a safety net against unexpected data, not an expected case.
+func (c *Checker) isChannelExcluded(caches cache.Caches, channelID snowflake.ID) bool {
+	id := channelID
+	for range 5 {
+		if c.excludedChannels[id] {
+			return true
+		}
+		ch, ok := caches.Channel(id)
+		if !ok {
+			return false
+		}
+		parentID := ch.ParentID()
+		if parentID == nil {
+			return false
+		}
+		id = *parentID
+	}
+	return false
+}
+
 // HandleMessage is the core logic, called for every non-bot message.
 // The method receiver (c *Checker) is Go's way of attaching functions to a struct -
 // like a class method, but declared separately. c is equivalent to `this` in TS.
@@ -152,7 +178,11 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	ctx := context.Background()
 	msg := e.Message
 
-	if c.excludedChannels[msg.ChannelID] || msg.Author.Bot {
+	if msg.Author.Bot {
+		return
+	}
+
+	if c.isChannelExcluded(e.Client().Caches, msg.ChannelID) {
 		return
 	}
 
@@ -342,6 +372,12 @@ func main() {
 				gateway.IntentGuildMessages,
 				gateway.IntentMessageContent, // privileged - enable in Dev Portal
 			),
+		),
+		// FlagChannels caches channels/threads (populated via GUILD_CREATE / CHANNEL_CREATE
+		// gateway events) so isChannelExcluded can walk the thread -> channel -> category
+		// parent chain without extra REST calls.
+		bot.WithCacheConfigOpts(
+			cache.WithCaches(cache.FlagChannels),
 		),
 		bot.WithEventListenerFunc(func(e *events.Ready) {
 			fmt.Printf("Logged in as %s\n", e.User.Username+"#"+e.User.Discriminator)

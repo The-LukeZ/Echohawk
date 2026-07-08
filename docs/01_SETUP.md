@@ -16,14 +16,14 @@
 
 ## Environment variables
 
-Create a `.env` file (the project uses `github.com/joho/godotenv`) and set these values:
+Create an `.env` file (the project uses `github.com/joho/godotenv`) and set these values:
 
 - `BOT_TOKEN` - Discord bot token
 - `GUILD_ID` - the Snowflake ID of the guild (server) to monitor
 - `ALERT_CHANNEL_ID` - Snowflake ID of the channel where alerts should be posted
 - `VALKEY_ADDR` - address(es) of your Valkey instance (e.g. `127.0.0.1:6379`)
   - When running via Docker Compose, you need to use `valkey:6379` as the address
-- `EXCLUDED_CHANNEL_IDS` - comma-separated channel IDs to ignore (optional)
+- `EXCLUDED_CHANNEL_IDS` - comma-separated channel/category/thread IDs to ignore (optional). Excluding a channel or category also excludes its threads and other children, since exclusion checks walk up the parent chain (thread -> parent channel -> category).
 - `SIMILARITY_MIN` - float (0.0–1.0) threshold for similarity (optional, default: `0.85`)
 - `ALERT_AFTER` - number of similar messages to trigger an alert (optional, default: `3`)
 - `WINDOW_SECONDS` - rolling window in seconds for counting similar messages (optional, default: `300`)
@@ -48,6 +48,8 @@ Multiple actions can be combined freely, e.g. `ACTIONS=delete_all,dm_user,timeou
 Mind, that you can only use `delete_all` **OR** `delete_last` - not both at the same time. Same applies to `kick_user` and `ban_user`.
 
 #### Example `.env`
+
+_copy via `cp .env.example .env` and edit values_
 
 ```bash
 BOT_TOKEN=your_bot_token_here

@@ -41,6 +41,6 @@ When a non-bot message is posted in the configured guild, the bot:
 
 ## Extensibility notes
 
-- Excluding channels: `EXCLUDED_CHANNEL_IDS` can be set to skip specific channels.
+- Excluding channels: `EXCLUDED_CHANNEL_IDS` can be set to skip specific channels, categories, or threads. Exclusion checks walk the channel's parent chain (thread -> parent channel -> category) via disgo's in-memory channel cache, so excluding a category or channel also excludes everything nested under it.
 - The similarity function and thresholds can be tuned or replaced (e.g., fuzzy hashing, NLP embeddings) for different tolerance.
 - You can send an alert message with details about the detected spam into the configured `ALERT_CHANNEL_ID` when the threshold is reached.
