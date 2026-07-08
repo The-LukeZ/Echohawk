@@ -16,13 +16,20 @@
 
 ## Environment variables
 
-Create an `.env` file (the project uses `github.com/joho/godotenv`) and set these values:
+Create an `.env` file (the project uses `github.com/joho/godotenv`) and set these values.
+
+Bootstrap/secrets - always read from `.env`, every run:
 
 - `BOT_TOKEN` - Discord bot token
 - `GUILD_ID` - the Snowflake ID of the guild (server) to monitor
-- `ALERT_CHANNEL_ID` - Snowflake ID of the channel where alerts should be posted
 - `VALKEY_ADDR` - address(es) of your Valkey instance (e.g. `127.0.0.1:6379`)
   - When running via Docker Compose, you need to use `valkey:6379` as the address
+- `SQLITE_PATH` - path to the SQLite config database (optional, default: `./data/echohawk.db`). Created automatically on first run - no separate init step or migration tool needed.  
+  `./data/echohawk.db` is the default path when running via Docker Compose, since the `data` directory is mounted as a volume.
+
+Runtime config - **deprecated**. These exist only as a legacy migration path: read once to seed the SQLite `config` table on its very first run (when that table is empty), then ignored forever after. Don't rely on them for new deployments - use the `/config` slash command (see `docs/02_HOW_IT_WORKS.md`) to set these at runtime instead:
+
+- `ALERT_CHANNEL_ID` - Snowflake ID of the channel where alerts should be posted
 - `EXCLUDED_CHANNEL_IDS` - comma-separated channel/category/thread IDs to ignore (optional). Excluding a channel or category also excludes its threads and other children, since exclusion checks walk up the parent chain (thread -> parent channel -> category).
 - `SIMILARITY_MIN` - float (0.0–1.0) threshold for similarity (optional, default: `0.85`)
 - `ALERT_AFTER` - number of similar messages to trigger an alert (optional, default: `3`)
@@ -30,6 +37,8 @@ Create an `.env` file (the project uses `github.com/joho/godotenv`) and set thes
 - `ACTIONS` - comma-separated list of automated actions to take when spam is detected (optional, default: none - alert only). See table below.
 - `TIMEOUT_DURATION` - how long in seconds to time out a user when `timeout_user` is in `ACTIONS` (optional, default: `300`)
 - `UNIFY_ATTACHMENTS` - when `true`, Discord CDN attachment/media links are collapsed to one placeholder before comparison, so spam using a different image link per message still matches (optional, default: `false`)
+
+Message templates (`alert`, `dm_user`, `timeout_reason`, `kick_reason`, `ban_reason`) have no env var - they're seeded with built-in defaults on first run and edited only via `/config message set <key>`.
 
 ### Available actions
 
@@ -54,8 +63,11 @@ _copy via `cp .env.example .env` and edit values_
 ```bash
 BOT_TOKEN=your_bot_token_here
 GUILD_ID=123456789012345678
-ALERT_CHANNEL_ID=987654321098765432
 VALKEY_ADDR=valkey:6379
+SQLITE_PATH=./data/echohawk.db
+
+# deprecated: seed values only, used once on first run - edit via /config after that
+ALERT_CHANNEL_ID=987654321098765432
 EXCLUDED_CHANNEL_IDS=111111111111111111,222222222222222222
 SIMILARITY_MIN=0.85
 ALERT_AFTER=3
@@ -105,7 +117,7 @@ For moderation actions (`timeout_user`, `kick_user`, `ban_user`, `delete_all`, `
 
 There are two ways to exclude channels from monitoring:
 
-1. Set the `EXCLUDED_CHANNEL_IDS` environment variable to a comma-separated list of channel IDs to ignore.
+1. Run `/config excluded_channels add <channel>` (or `remove`) at runtime - the recommended way, takes effect immediately without a restart. `EXCLUDED_CHANNEL_IDS` in `.env` only seeds the initial DB value on first run.
 2. Deny the bot's `View Channel` permission for specific channels (even whole categories!) in your server settings. The bot will simply not receive message events for channels it cannot view.
 
 Excluding users based on roles or permissions is not currently supported but could be implemented in a future update.
