@@ -55,8 +55,9 @@ func main() {
 	checker := &Checker{ // & means "give me a pointer to this struct"
 		vk:      vk,
 		guildID: guildID,
-		cfg:     cfg,
+		store:   store,
 	}
+	checker.SetCfg(cfg)
 
 	client, err := disgo.New(
 		os.Getenv("BOT_TOKEN"),
@@ -78,9 +79,18 @@ func main() {
 		}),
 		// Pass the method as a function value with checker.HandleMessage
 		bot.WithEventListenerFunc(checker.HandleMessage),
+		bot.WithEventListenerFunc(checker.HandleConfigCommand),
 	)
 	if err != nil {
 		panic(err)
+	}
+
+	// Guild-scoped registration (instant, vs global's ~1hr propagation) - fits
+	// the bot's single-guild design. Re-registering on every startup is
+	// idempotent (disgo/Discord overwrite by name), so command tree changes
+	// ship with each deploy without a manual step.
+	if _, err = client.Rest.SetGuildCommands(client.ApplicationID, guildID, commandDefs); err != nil {
+		panic(fmt.Sprintf("failed to register commands: %v", err))
 	}
 
 	if err = client.OpenGateway(context.TODO()); err != nil {

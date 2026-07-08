@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/events"
@@ -13,10 +14,26 @@ import (
 // Checker holds shared state - the Valkey client and the runtime config
 // loaded from SQLite. Structs replace classes in Go: no constructor, just
 // initialize the fields.
+//
+// cfg is an atomic.Pointer rather than a plain *Config so that /config
+// commands can swap in a freshly-loaded Config without a bot restart, and
+// without readers on the hot message path blocking on a lock.
 type Checker struct {
 	vk      valkey.Client
 	guildID snowflake.ID
-	cfg     *Config
+	store   *configStore
+	cfg     atomic.Pointer[Config]
+}
+
+// Cfg returns the currently active Config. Safe to call concurrently with
+// SetCfg.
+func (c *Checker) Cfg() *Config {
+	return c.cfg.Load()
+}
+
+// SetCfg swaps in a new Config, e.g. after a /config command mutates SQLite.
+func (c *Checker) SetCfg(cfg *Config) {
+	c.cfg.Store(cfg)
 }
 
 // isChannelExcluded checks channelID and walks up its parent chain (thread -> parent
@@ -25,10 +42,10 @@ type Checker struct {
 // (populated from gateway events), so no extra REST calls or Valkey round-trips are needed.
 // Channels only nest two levels deep on Discord (category -> channel -> thread), so the
 // loop bound is just a safety net against unexpected data, not an expected case.
-func (c *Checker) isChannelExcluded(caches cache.Caches, channelID snowflake.ID) bool {
+func (c *Checker) isChannelExcluded(caches cache.Caches, channelID snowflake.ID, excluded map[snowflake.ID]bool) bool {
 	id := channelID
 	for range 5 {
-		if c.cfg.ExcludedChannels[id] {
+		if excluded[id] {
 			return true
 		}
 		ch, ok := caches.Channel(id)
@@ -50,12 +67,13 @@ func (c *Checker) isChannelExcluded(caches cache.Caches, channelID snowflake.ID)
 func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	ctx := context.Background()
 	msg := e.Message
+	cfg := c.Cfg()
 
 	if msg.Author.Bot {
 		return
 	}
 
-	if c.isChannelExcluded(e.Client().Caches, msg.ChannelID) {
+	if c.isChannelExcluded(e.Client().Caches, msg.ChannelID, cfg.ExcludedChannels) {
 		return
 	}
 
@@ -63,7 +81,7 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 		return // ignore DMs and messages from other servers
 	}
 
-	content := normalize(msg.Content, c.cfg.UnifyAttachments)
+	content := normalize(msg.Content, cfg.UnifyAttachments)
 	if content == "" {
 		return // skip embeds-only or empty messages
 	}
@@ -91,7 +109,7 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	var similarMsgs []cachedMsg
 	for _, raw := range prev {
 		cached := parseEntry(raw)
-		if similarity(content, cached.content) >= c.cfg.SimilarityMin {
+		if similarity(content, cached.content) >= cfg.SimilarityMin {
 			similarMsgs = append(similarMsgs, cached)
 		}
 	}
@@ -123,12 +141,12 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	// Set the TTL only on first increment (count == 1 means key was just created).
 	// This starts the window from the first similar message.
 	if count == 1 {
-		c.vk.Do(ctx, c.vk.B().Expire().Key(counterKey).Seconds(c.cfg.WindowSeconds).Build())
+		c.vk.Do(ctx, c.vk.B().Expire().Key(counterKey).Seconds(cfg.WindowSeconds).Build())
 	}
 
 	// --- Step 5: Execute configured actions when threshold exceeded, then reset counter ---
-	if count >= c.cfg.AlertAfter {
+	if count >= cfg.AlertAfter {
 		c.vk.Do(ctx, c.vk.B().Del().Key(counterKey).Build())
-		c.executeActions(e, count, content, similarMsgs)
+		c.executeActions(e, cfg, count, content, similarMsgs)
 	}
 }
