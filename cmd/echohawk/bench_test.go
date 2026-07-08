@@ -17,17 +17,21 @@ import (
 func buildCache(n int, text string) []string {
 	out := make([]string, n)
 	for i := range out {
-		out[i] = normalize(fmt.Sprintf("%s variant %d", text, i))
+		out[i] = normalize(fmt.Sprintf("%s variant %d", text, i), false)
 	}
 	return out
 }
+
+// defaultSimilarityMin mirrors the DB-seeded default (0.85) for benchmarks
+// that don't have a Checker/Config to read from.
+const defaultSimilarityMin = 0.85
 
 // countSimilar is the hot loop extracted from HandleMessage so it can be
 // benchmarked in isolation without needing a Valkey connection.
 func countSimilar(content string, prev []string) int {
 	count := 0
 	for _, p := range prev {
-		if similarity(content, p) >= similarityMin {
+		if similarity(content, p) >= defaultSimilarityMin {
 			count++
 		}
 	}
@@ -40,7 +44,7 @@ func BenchmarkNormalize_Short(b *testing.B) {
 	input := "  HELLO WORLD!  "
 	b.ResetTimer()
 	for b.Loop() {
-		normalize(input)
+		normalize(input, false)
 	}
 }
 
@@ -48,7 +52,7 @@ func BenchmarkNormalize_Long(b *testing.B) {
 	input := "  " + strings.Repeat("This Is A Sentence. ", 50) + "  "
 	b.ResetTimer()
 	for b.Loop() {
-		normalize(input)
+		normalize(input, false)
 	}
 }
 
@@ -57,7 +61,7 @@ func BenchmarkNormalize_Parallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			normalize(input)
+			normalize(input, false)
 		}
 	})
 }
@@ -68,33 +72,27 @@ func BenchmarkNormalize_Parallel(b *testing.B) {
 // when UNIFY_ATTACHMENTS is enabled, vs. the flag-off baseline above.
 
 func BenchmarkNormalize_UnifyAttachments_NoLink(b *testing.B) {
-	unifyAttachments = true
-	defer func() { unifyAttachments = false }()
 	input := "  " + strings.Repeat("This Is A Sentence. ", 50) + "  "
 	b.ResetTimer()
 	for b.Loop() {
-		normalize(input)
+		normalize(input, true)
 	}
 }
 
 func BenchmarkNormalize_UnifyAttachments_WithLink(b *testing.B) {
-	unifyAttachments = true
-	defer func() { unifyAttachments = false }()
 	input := "check this out https://cdn.discordapp.com/attachments/123456789/987654321/image.png?ex=abcd1234&is=efgh5678"
 	b.ResetTimer()
 	for b.Loop() {
-		normalize(input)
+		normalize(input, true)
 	}
 }
 
 func BenchmarkNormalize_UnifyAttachments_Parallel(b *testing.B) {
-	unifyAttachments = true
-	defer func() { unifyAttachments = false }()
 	input := "spam drop " + strings.Repeat("https://cdn.discordapp.com/attachments/1/2/a.png ", 5)
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			normalize(input)
+			normalize(input, true)
 		}
 	})
 }
@@ -138,8 +136,8 @@ func BenchmarkSimilarity_Medium(b *testing.B) {
 func BenchmarkSimilarity_Long(b *testing.B) {
 	a := strings.Repeat("this is a longer repeated spam message please flag it ", 10)    // ~530 chars
 	bStr := strings.Repeat("this is a Longer repeated spam message please flag it ", 10) // case diff
-	a = normalize(a)
-	bStr = normalize(bStr)
+	a = normalize(a, false)
+	bStr = normalize(bStr, false)
 	b.ResetTimer()
 	for b.Loop() {
 		similarity(a, bStr)
@@ -156,8 +154,8 @@ func BenchmarkSimilarity_CompletelyDifferent(b *testing.B) {
 }
 
 func BenchmarkSimilarity_Parallel(b *testing.B) {
-	a := normalize(strings.Repeat("parallel similarity stress test sentence ", 5))
-	bStr := normalize(strings.Repeat("parallel similarity stress test sentense ", 5)) // typo
+	a := normalize(strings.Repeat("parallel similarity stress test sentence ", 5), false)
+	bStr := normalize(strings.Repeat("parallel similarity stress test sentense ", 5), false) // typo
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			similarity(a, bStr)
@@ -169,7 +167,7 @@ func BenchmarkSimilarity_Parallel(b *testing.B) {
 
 // BenchmarkSimilarityLoop_NoHits: new message is completely unlike all cached ones.
 func BenchmarkSimilarityLoop_NoHits(b *testing.B) {
-	content := normalize("totally different content here")
+	content := normalize("totally different content here", false)
 	prev := buildCache(maxCached, "buy cheap products now click here")
 	b.ResetTimer()
 	for b.Loop() {
@@ -179,8 +177,8 @@ func BenchmarkSimilarityLoop_NoHits(b *testing.B) {
 
 // BenchmarkSimilarityLoop_AllHits: new message is nearly identical to all cached ones.
 func BenchmarkSimilarityLoop_AllHits(b *testing.B) {
-	base := normalize("buy cheap products now click here")
-	content := normalize("buy cheap products now click here!") // tiny diff → still hits
+	base := normalize("buy cheap products now click here", false)
+	content := normalize("buy cheap products now click here!", false) // tiny diff → still hits
 	prev := buildCache(maxCached, "buy cheap products now click here")
 	// override all entries with the base so they all match
 	for i := range prev {
@@ -194,8 +192,8 @@ func BenchmarkSimilarityLoop_AllHits(b *testing.B) {
 
 // BenchmarkSimilarityLoop_HalfHits: 15 hits, 15 misses - typical mid-traffic case.
 func BenchmarkSimilarityLoop_HalfHits(b *testing.B) {
-	base := normalize("buy cheap products now click here")
-	content := normalize("buy cheap products now click here!")
+	base := normalize("buy cheap products now click here", false)
+	content := normalize("buy cheap products now click here!", false)
 	prev := buildCache(maxCached, "totally different noise message text")
 	for i := 0; i < maxCached/2; i++ {
 		prev[i] = base
@@ -208,8 +206,8 @@ func BenchmarkSimilarityLoop_HalfHits(b *testing.B) {
 
 // BenchmarkSimilarityLoop_LongMessages: stress with realistically long Discord messages.
 func BenchmarkSimilarityLoop_LongMessages(b *testing.B) {
-	base := normalize(strings.Repeat("spam message body text repeated for length ", 10))
-	content := normalize(strings.Repeat("spam message body text repeated for Iength ", 10)) // l→I swap
+	base := normalize(strings.Repeat("spam message body text repeated for length ", 10), false)
+	content := normalize(strings.Repeat("spam message body text repeated for Iength ", 10), false) // l→I swap
 	prev := make([]string, maxCached)
 	for i := range prev {
 		prev[i] = base
@@ -224,13 +222,10 @@ func BenchmarkSimilarityLoop_LongMessages(b *testing.B) {
 // unique attachment link (like real-world image spam); with UNIFY_ATTACHMENTS on
 // they all collapse to the same placeholder and should all hit.
 func BenchmarkSimilarityLoop_UnifyAttachments_AllHits(b *testing.B) {
-	unifyAttachments = true
-	defer func() { unifyAttachments = false }()
-
-	content := normalize("check this out https://cdn.discordapp.com/attachments/999/999/z.png")
+	content := normalize("check this out https://cdn.discordapp.com/attachments/999/999/z.png", true)
 	prev := make([]string, maxCached)
 	for i := range prev {
-		prev[i] = normalize(fmt.Sprintf("check this out https://cdn.discordapp.com/attachments/%d/%d/img%d.png", i, i, i))
+		prev[i] = normalize(fmt.Sprintf("check this out https://cdn.discordapp.com/attachments/%d/%d/img%d.png", i, i, i), true)
 	}
 	b.ResetTimer()
 	for b.Loop() {
@@ -246,8 +241,8 @@ func BenchmarkSimilarityLoop_UnifyAttachments_AllHits(b *testing.B) {
 
 func benchCacheSize(b *testing.B, cacheSize int, msgText string) {
 	b.Helper()
-	base := normalize(msgText)
-	content := normalize(msgText + "!")
+	base := normalize(msgText, false)
+	content := normalize(msgText+"!", false)
 	prev := make([]string, cacheSize)
 	for i := range prev {
 		prev[i] = base
@@ -276,8 +271,8 @@ func BenchmarkCacheSweep_Long_100(b *testing.B) { benchCacheSize(b, 100, longMsg
 // BenchmarkSimilarityLoop_Parallel: concurrent goroutines each running a full
 // message check - closest simulation to real multi-user Discord traffic.
 func BenchmarkSimilarityLoop_Parallel(b *testing.B) {
-	base := normalize("buy cheap products now click here")
-	content := normalize("buy cheap products now click here!")
+	base := normalize("buy cheap products now click here", false)
+	content := normalize("buy cheap products now click here!", false)
 	prev := make([]string, maxCached)
 	for i := range prev {
 		prev[i] = base
@@ -324,7 +319,7 @@ func runThroughputTest(t *testing.T, msgsPerSec, cacheSize int) {
 	t.Helper()
 
 	prev := make([]string, cacheSize)
-	base := normalize("buy cheap products now click here")
+	base := normalize("buy cheap products now click here", false)
 	for i := range prev {
 		prev[i] = base
 	}
@@ -354,7 +349,7 @@ func runThroughputTest(t *testing.T, msgsPerSec, cacheSize int) {
 			defer wg.Done()
 			start := time.Now()
 
-			content := normalize(raw)
+			content := normalize(raw, false)
 			countSimilar(content, prev)
 
 			elapsed := time.Since(start)

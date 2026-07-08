@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/disgoorg/disgo"
@@ -32,35 +31,31 @@ func main() {
 	}
 	defer vk.Close() // defer runs when main() exits - like `finally` in TS
 
-	alertChannelID, err := snowflake.Parse(os.Getenv("ALERT_CHANNEL_ID"))
-	if err != nil {
-		panic("invalid ALERT_CHANNEL_ID in .env")
-	}
-
 	guildID, err := snowflake.Parse(os.Getenv("GUILD_ID"))
 	if err != nil {
 		panic("invalid GUILD_ID in .env")
 	}
 
-	excludedChannels := map[snowflake.ID]bool{}
-	if v := os.Getenv("EXCLUDED_CHANNEL_IDS"); v != "" {
-		for raw := range strings.SplitSeq(v, ",") {
-			if id, err := snowflake.Parse(strings.TrimSpace(raw)); err == nil {
-				excludedChannels[id] = true
-			}
-		}
+	sqlitePath := os.Getenv("SQLITE_PATH")
+	if sqlitePath == "" {
+		sqlitePath = "./data/echohawk.db"
+	}
+	db, err := openDB(sqlitePath)
+	if err != nil {
+		panic(fmt.Sprintf("failed to open config database: %v", err))
+	}
+	defer db.Close()
+
+	store := newConfigStore(db)
+	cfg, err := store.Load()
+	if err != nil {
+		panic(fmt.Sprintf("failed to load config: %v", err))
 	}
 
 	checker := &Checker{ // & means "give me a pointer to this struct"
-		vk:               vk,
-		alertChannel:     alertChannelID,
-		excludedChannels: excludedChannels,
-		guildID:          guildID,
-		actions:          actions,
-		similarityMin:    similarityMin,
-		alertAfter:       alertAfter,
-		windowSeconds:    windowSeconds,
-		timeoutDuration:  timeoutDuration,
+		vk:      vk,
+		guildID: guildID,
+		cfg:     cfg,
 	}
 
 	client, err := disgo.New(

@@ -2,6 +2,11 @@ package main
 
 import "strings"
 
+const (
+	maxCached = 50   // max messages stored per user
+	cacheTTL  = 3600 // key expires after 1 hour of inactivity
+)
+
 // cachedMsg holds a stored message's location and normalized content,
 // parsed back out of the Valkey list entry.
 type cachedMsg struct {

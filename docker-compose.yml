@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     depends_on:
       - valkey
+    volumes:
+      - echohawk_data:/app/data
 
   valkey:
     image: valkey/valkey:latest
@@ -14,3 +16,4 @@ services:
 
 volumes:
   valkey_data:
+  echohawk_data:

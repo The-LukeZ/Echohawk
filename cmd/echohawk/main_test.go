@@ -35,7 +35,7 @@ func TestNormalize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := normalize(tt.input)
+			result := normalize(tt.input, false)
 			if result != tt.expected {
 				t.Errorf("normalize(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
@@ -71,12 +71,9 @@ func TestNormalizeUnifyAttachments(t *testing.T) {
 		},
 	}
 
-	unifyAttachments = true
-	defer func() { unifyAttachments = false }()
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := normalize(tt.input)
+			result := normalize(tt.input, true)
 			if result != tt.expected {
 				t.Errorf("normalize(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
@@ -85,22 +82,17 @@ func TestNormalizeUnifyAttachments(t *testing.T) {
 }
 
 func TestNormalizeAttachmentsUntouchedWhenDisabled(t *testing.T) {
-	unifyAttachments = false
-
 	input := "check this out https://cdn.discordapp.com/attachments/123/456/image.png"
 	expected := "check this out https://cdn.discordapp.com/attachments/123/456/image.png"
 
-	if result := normalize(input); result != expected {
+	if result := normalize(input, false); result != expected {
 		t.Errorf("normalize(%q) = %q, want %q (flag off should be no-op)", input, result, expected)
 	}
 }
 
 func TestSimilarityUnifiesDifferentAttachmentLinks(t *testing.T) {
-	unifyAttachments = true
-	defer func() { unifyAttachments = false }()
-
-	a := normalize("check this out https://cdn.discordapp.com/attachments/1/1/a.png")
-	b := normalize("check this out https://cdn.discordapp.com/attachments/2/2/b.png")
+	a := normalize("check this out https://cdn.discordapp.com/attachments/1/1/a.png", true)
+	b := normalize("check this out https://cdn.discordapp.com/attachments/2/2/b.png", true)
 
 	if got := similarity(a, b); got != 1.0 {
 		t.Errorf("similarity(%q, %q) = %v, want 1.0 (different attachment links should unify)", a, b, got)
@@ -163,14 +155,15 @@ func TestSimilarity(t *testing.T) {
 }
 
 func TestSimilarityThreshold(t *testing.T) {
-	// Verify that similarity meets the similarityMin threshold for near-identical messages
+	// Verify that similarity meets the default similarityMin threshold for near-identical messages
+	const defaultSimilarityMin = 0.85
 	message1 := "this is a test message"
 	message2 := "this is a test mesage" // one typo
 	sim := similarity(message1, message2)
 
-	if sim < similarityMin {
-		t.Logf("similarity score: %f (below threshold %f)", sim, similarityMin)
+	if sim < defaultSimilarityMin {
+		t.Logf("similarity score: %f (below threshold %f)", sim, defaultSimilarityMin)
 	} else {
-		t.Logf("similarity score: %f (meets threshold %f)", sim, similarityMin)
+		t.Logf("similarity score: %f (meets threshold %f)", sim, defaultSimilarityMin)
 	}
 }

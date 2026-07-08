@@ -15,7 +15,7 @@ var attachmentURLRegex = regexp.MustCompile(`(?i)https?://(?:cdn\.discordapp\.co
 // normalize strips noise before comparing so "Hello!" and "hello" count as the same.
 // When unifyAttachments is on, Discord CDN links are collapsed to one placeholder so
 // spam consisting of different attachment URLs (e.g. unique image links) still matches.
-func normalize(s string) string {
+func normalize(s string, unifyAttachments bool) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if unifyAttachments {
 		s = attachmentURLRegex.ReplaceAllString(s, "[attachment]")

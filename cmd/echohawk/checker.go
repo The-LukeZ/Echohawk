@@ -10,18 +10,13 @@ import (
 	valkey "github.com/valkey-io/valkey-go"
 )
 
-// Checker holds shared state - the Valkey client and alert channel ID.
-// Structs replace classes in Go: no constructor, just initialize the fields.
+// Checker holds shared state - the Valkey client and the runtime config
+// loaded from SQLite. Structs replace classes in Go: no constructor, just
+// initialize the fields.
 type Checker struct {
-	vk               valkey.Client
-	alertChannel     snowflake.ID
-	excludedChannels map[snowflake.ID]bool
-	guildID          snowflake.ID
-	actions          map[string]bool
-	similarityMin    float64
-	alertAfter       int64
-	windowSeconds    int64
-	timeoutDuration  int64
+	vk      valkey.Client
+	guildID snowflake.ID
+	cfg     *Config
 }
 
 // isChannelExcluded checks channelID and walks up its parent chain (thread -> parent
@@ -33,7 +28,7 @@ type Checker struct {
 func (c *Checker) isChannelExcluded(caches cache.Caches, channelID snowflake.ID) bool {
 	id := channelID
 	for range 5 {
-		if c.excludedChannels[id] {
+		if c.cfg.ExcludedChannels[id] {
 			return true
 		}
 		ch, ok := caches.Channel(id)
@@ -68,7 +63,7 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 		return // ignore DMs and messages from other servers
 	}
 
-	content := normalize(msg.Content)
+	content := normalize(msg.Content, c.cfg.UnifyAttachments)
 	if content == "" {
 		return // skip embeds-only or empty messages
 	}
@@ -96,7 +91,7 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	var similarMsgs []cachedMsg
 	for _, raw := range prev {
 		cached := parseEntry(raw)
-		if similarity(content, cached.content) >= c.similarityMin {
+		if similarity(content, cached.content) >= c.cfg.SimilarityMin {
 			similarMsgs = append(similarMsgs, cached)
 		}
 	}
@@ -128,11 +123,11 @@ func (c *Checker) HandleMessage(e *events.MessageCreate) {
 	// Set the TTL only on first increment (count == 1 means key was just created).
 	// This starts the window from the first similar message.
 	if count == 1 {
-		c.vk.Do(ctx, c.vk.B().Expire().Key(counterKey).Seconds(c.windowSeconds).Build())
+		c.vk.Do(ctx, c.vk.B().Expire().Key(counterKey).Seconds(c.cfg.WindowSeconds).Build())
 	}
 
 	// --- Step 5: Execute configured actions when threshold exceeded, then reset counter ---
-	if count >= c.alertAfter {
+	if count >= c.cfg.AlertAfter {
 		c.vk.Do(ctx, c.vk.B().Del().Key(counterKey).Build())
 		c.executeActions(e, count, content, similarMsgs)
 	}
