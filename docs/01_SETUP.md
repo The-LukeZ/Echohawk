@@ -73,6 +73,8 @@ go mod tidy
 go build -o echohawk ./cmd/echohawk
 ```
 
+Note that valkey must be running and reachable at the address specified in `VALKEY_ADDR` for the bot to function correctly.
+
 2. Run the bot (loads `.env` automatically via godotenv):
 
 ```bash
