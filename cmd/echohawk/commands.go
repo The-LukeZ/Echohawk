@@ -376,6 +376,11 @@ func (c *Checker) handleMessageCommand(data discord.SlashCommandInteractionData)
 		return nil, fmt.Errorf("template contains unknown placeholder(s): %s (allowed: {user_id} {count} {window} {content})", strings.Join(unknown, ", "))
 	}
 
+	// Discord string options can't carry a literal newline keystroke, so
+	// users type the escape sequence "\n" to mean one - turn it into a real
+	// newline before storing, or it would render as a literal backslash-n.
+	template = strings.ReplaceAll(template, `\n`, "\n")
+
 	return c.store.SetMessage(key, template)
 }
 
